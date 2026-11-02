@@ -11,12 +11,19 @@
   CF_ACCOUNT_ID         可选，默认下面的 ACCT
   CF_PAGES_PROJECT      可选，默认 kele551-apps
   CF_PAGES_BRANCH       可选，默认 main（只有等于项目的 production_branch 才占正式域名）
+  CF_SKIP_PREFLIGHT     可选。设 1 就跳过「先发预览再提升」，直接发正式（不建议）
   SITE_DIR              可选，默认本脚本所在仓库的根目录
+
+发布顺序（默认，正式发布时）：
+  ① 先把页面发到一个预览分支 ci-verify → 轮询就绪 → 回读那个预览地址校验 sha256
+  ② 校验通过才用 main 发正式部署 → 再回读生产地址校验一次
+  ③ 校验不过就退出非 0，**正式站一个字都不动**
+  背景：2026-11-02 出过「四步全 API 成功、线上全 500」的事故，所以必须验证再上生产。
 
 ★ 资产键不是文件字节的 blake3，而是：
       blake3( base64(文件内容) + 扩展名(不带点) ).hex()[:32]
   这是 wrangler 的 hashFile。传错不会报错：上传成功、哈希登记成功、部署 stage=success，
-  但线上每个资源都取不到（500），日志里没有任何线索。2026-11-02 就栽在这上面。
+  但线上每个资源都取不到（500），日志里没有任何线索。
 
 四步（CF 的 Direct Upload）：
   1) GET  /accounts/<acct>/pages/projects/<proj>/upload-token   返回字段叫 jwt（POST 不行）
@@ -24,7 +31,6 @@
   3) POST /pages/assets/upsert-hashes  JSON: {"hashes": [资产键, ...]}
   4) POST /accounts/<acct>/pages/projects/<proj>/deployments
           multipart 字段 manifest（{"/index.html": 资产键}）+ branch + commit_message
-  然后轮询部署状态，最后回读生产地址比对 sha256 —— 部署成功 ≠ 能打开。
 """
 import base64
 import hashlib
@@ -44,7 +50,10 @@ PROJECT = os.environ.get("CF_PAGES_PROJECT") or "kele551-apps"
 BRANCH = os.environ.get("CF_PAGES_BRANCH") or "main"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE_DIR = os.environ.get("SITE_DIR") or os.path.dirname(HERE)
-MARKER = "桌面小工具"          # 回读验证用的字符串，页面上必须有
+SKIP_PREFLIGHT = (os.environ.get("CF_SKIP_PREFLIGHT") or "") in ("1", "true", "yes")
+PREVIEW_BRANCH = "ci-verify"       # 正式发布前的验证分支；它不等于 production_branch，所以不占正式域名
+MARKER = "桌面小工具"              # 回读验证用的字符串，页面上必须有
+PROD_URL = "https://%s.pages.dev/" % PROJECT
 
 
 def token():
@@ -135,30 +144,24 @@ def get_upload_jwt():
     return None
 
 
-def do_apply():
-    files = site_files()
-    sizes = {n: len(c) for n, c in files}
-    digests = {n: asset_hash(n, c) for n, c in files}
-
-    # 1. 项目不存在就建（Direct Upload：不写 source 即为直传项目）
+def ensure_project():
     ok, res, _ = call("GET", "/accounts/%s/pages/projects/%s" % (ACCT, PROJECT))
-    if not ok:
-        print("项目 %s 不存在，创建中…" % PROJECT)
-        ok, res, _ = call("POST", "/accounts/%s/pages/projects" % ACCT,
-                          {"name": PROJECT, "production_branch": BRANCH})
-        if not ok:
-            print("创建项目失败")
-            show_errs(res)
-            return False
-    else:
+    if ok:
         print("项目 %s（production_branch=%s）" % (res.get("name"), res.get("production_branch")))
-
-    # 2. 资产上传 JWT
-    jwt = get_upload_jwt()
-    if not jwt:
+        return True
+    print("项目 %s 不存在，创建中…" % PROJECT)
+    ok, res, _ = call("POST", "/accounts/%s/pages/projects" % ACCT,
+                      {"name": PROJECT, "production_branch": BRANCH})
+    if not ok:
+        print("创建项目失败")
+        show_errs(res)
         return False
+    return True
 
-    # 3. 上传资产
+
+def upload_assets(files, jwt):
+    """上传文件并登记哈希，返回 {文件名: 资产键}；失败返回 None。"""
+    digests = {n: asset_hash(n, c) for n, c in files}
     payload = [{"key": digests[n], "value": base64.b64encode(c).decode("ascii"),
                 "metadata": {"contentType": content_type(n)}, "base64": True}
                for n, c in files]
@@ -166,32 +169,34 @@ def do_apply():
     if not ok:
         print("资产上传失败")
         show_errs(raw)
-        return False
+        return None
     print("已上传 %d 个文件（%d 字节，%s）" % (
-        len(files), sum(sizes.values()), "/".join(sorted({content_type(n) for n in sizes}))))
-
-    # 4. 登记哈希（失败不阻断，第五步才是真检验）
+        len(files), sum(len(c) for _, c in files),
+        "/".join(sorted({content_type(n) for n, _ in files}))))
     ok, res, _ = call("POST", "/pages/assets/upsert-hashes",
                       body={"hashes": sorted(set(digests.values()))}, auth=jwt)
-    print("   upsert-hashes %s" % ("通过" if ok else "被拒（继续）"))
+    print("   upsert-hashes %s" % ("通过" if ok else "被拒（继续，部署才是真检验）"))
     if not ok:
         show_errs(res)
+    return digests
 
-    # 5. 建部署（manifest 键带前导斜杠，值是裸哈希）
+
+def create_deployment(digests, branch):
     manifest = {"/" + n: h for n, h in digests.items()}
     msg = os.environ.get("GITHUB_SHA", "")[:8] or time.strftime("%Y-%m-%d %H:%M")
     ok, dep, _ = call("POST", "/accounts/%s/pages/projects/%s/deployments" % (ACCT, PROJECT),
                       fields=[("manifest", json.dumps(manifest)),
-                              ("branch", BRANCH),
-                              ("commit_message", "落地页 %s" % msg)])
+                              ("branch", branch),
+                              ("commit_message", "落地页 %s（%s）" % (msg, branch))])
     if not ok or not isinstance(dep, dict):
-        print("建部署失败")
+        print("建部署失败（branch=%s）" % branch)
         show_errs(dep)
-        return False
-    dep_id, dep_url = dep.get("id"), dep.get("url")
-    print("部署已提交 %s → %s" % (dep_id, dep_url))
+        return None
+    print("部署已提交 [%s] %s → %s" % (branch, dep.get("id"), dep.get("url")))
+    return dep
 
-    # 6. 轮询到 ready
+
+def wait_ready(dep_id, branch):
     for i in range(30):
         time.sleep(4)
         ok, d, _ = call("GET", "/accounts/%s/pages/projects/%s/deployments/%s" % (ACCT, PROJECT, dep_id))
@@ -202,35 +207,69 @@ def do_apply():
         st = ({(s.get("name") or "?"): s.get("status") for s in stages if isinstance(s, dict)}
               if isinstance(stages, list) else
               {k: (v or {}).get("status") for k, v in (stages or {}).items()})
-        print("   [%2d] %s  latest=%s  file_count=%s" % (
-            i + 1, " ".join("%s=%s" % (k, v) for k, v in st.items()),
+        print("   [%2d] %s %s  latest=%s  file_count=%s" % (
+            i + 1, branch, " ".join("%s=%s" % (k, v) for k, v in st.items()),
             (d.get("latest_stage") or {}).get("status"), d.get("file_count")))
         if st.get("deploy") == "success":
-            break
+            return True
         if "failed" in list(st.values()) or (d.get("latest_stage") or {}).get("status") == "failed":
             print("部署失败：%s" % json.dumps(stages, ensure_ascii=False)[:600])
             return False
+    print("轮询 120 秒还没就绪")
+    return False
 
-    # 7. 回读验证：必须 200 且与本地逐字节一致（部署成功≠能打开）
-    want = hashlib.sha256(dict(files)["index.html"]).hexdigest()
-    prod = "https://%s.pages.dev/" % PROJECT
-    primary = prod if BRANCH == "main" else dep_url
-    for attempt in range(1, 7):
+
+def verify(url, want_sha, tries=6):
+    """回读地址：必须 200，且（能比的时候）与本地逐字节一致。"""
+    for attempt in range(1, tries + 1):
         if attempt > 1:
             time.sleep(5)
         try:
             with urllib.request.urlopen(urllib.request.Request(
-                    primary, headers={"User-Agent": "deploy-verify"}), timeout=30) as r:
+                    url, headers={"User-Agent": "deploy-verify"}), timeout=30) as r:
                 body = r.read()
-            same = hashlib.sha256(body).hexdigest() == want
-            print("   回读 %s → HTTP %s 长度 %d 一致=%s" % (primary, r.status, len(body), same))
+            same = hashlib.sha256(body).hexdigest() == want_sha
+            print("   回读 %s → HTTP %s 长度 %d 一致=%s" % (url, r.status, len(body), same))
             if r.status == 200 and same:
-                print("✔ 发布成功：%s" % prod)
                 return True
         except Exception as e:
-            print("   回读 %s 失败：%s" % (primary, e))
-    print("✘ 生产地址没通过验证，去控制台把这个部署回滚掉：dash.cloudflare.com → Pages → %s" % PROJECT)
+            print("   回读 %s 失败：%s" % (url, e))
     return False
+
+
+def do_apply():
+    files = site_files()
+    want = hashlib.sha256(dict(files)["index.html"]).hexdigest()
+
+    if not ensure_project():
+        return False
+    jwt = get_upload_jwt()
+    if not jwt:
+        return False
+    digests = upload_assets(files, jwt)
+    if not digests:
+        return False
+
+    # 正式发布：先把同样的资产发到预览分支验证，过了再上生产，坏内容不会见到访客
+    if BRANCH == "main" and not SKIP_PREFLIGHT:
+        dep = create_deployment(digests, PREVIEW_BRANCH)
+        if not dep or not wait_ready(dep.get("id"), PREVIEW_BRANCH):
+            print("✘ 预览部署没就绪，正式站一个字都没动")
+            return False
+        if not verify(dep.get("url"), want):
+            print("✘ 预览地址校验不过（可能资产键/清单有问题），正式站一个字都没动")
+            return False
+        print("✔ 预览校验通过，开始发正式部署")
+
+    dep = create_deployment(digests, BRANCH)
+    if not dep or not wait_ready(dep.get("id"), BRANCH):
+        return False
+    target = PROD_URL if BRANCH == "main" else dep.get("url")
+    if not verify(target, want):
+        print("✘ 生产地址没通过验证，去控制台把这个部署回滚：dash.cloudflare.com → Pages → %s" % PROJECT)
+        return False
+    print("✔ 发布成功：%s" % PROD_URL)
+    return True
 
 
 if __name__ == "__main__":
