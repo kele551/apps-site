@@ -30,7 +30,7 @@
   2) POST /pages/assets/upload         JSON: [{key: 资产键, value: base64, metadata: {contentType}, base64: true}]
   3) POST /pages/assets/upsert-hashes  JSON: {"hashes": [资产键, ...]}
   4) POST /accounts/<acct>/pages/projects/<proj>/deployments
-          multipart 字段 manifest（{"/index.html": 资产键}）+ branch + commit_message
+          multipart 字段 manifest（{"/index.html": 资产键, "/og-cover.png": 资产键}）+ branch + commit_message
 """
 import base64
 import hashlib
@@ -129,7 +129,14 @@ def site_files():
         html = f.read()
     if MARKER.encode("utf-8") not in html:
         raise SystemExit("index.html 里没有「%s」，不像这个站的页面，停住不动" % MARKER)
-    return [("index.html", html)]
+    files = [("index.html", html)]
+    # 分享封面由 build_page.py 生成；存在就一起上传，缺失时不影响原来的单文件发布。
+    for extra in ("og-cover.png",):
+        p = os.path.join(SITE_DIR, extra)
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                files.append((extra, f.read()))
+    return files
 
 
 def get_upload_jwt():

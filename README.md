@@ -15,18 +15,37 @@
 - 工作流：`.github/workflows/deploy.yml`
 - 发布脚本：`tools/deploy_pages.py`（纯 REST，不需要 node / wrangler）
 - 密钥：仓库 Secret `CLOUDFLARE_API_TOKEN`（权限 Account → Cloudflare Pages → Edit）
-- 只有 `index.html` / 脚本 / 工作流变动才触发；改 README 不触发。
+- 只有 `index.html` / `og-cover.png` / 脚本 / 工作流变动才触发；改 README 不触发。
 - 发布末尾会**回读生产地址比对 sha256**，不一致就让这次 Actions 红掉（部署成功不等于能打开）。
 
 ## 页面怎么改
 
-页面本体由本地脚本生成（四款 app 的图标、实时数字快照都内联进去），生成器不放进这个仓库
-（它要读本机各项目的图标路径）。改法：
+页面本体由本地脚本生成（四款 app 的图标、界面截图、数字快照都内联进 `index.html`），
+生成器不放进这个仓库（它要读本机各项目的图标路径和 `shots\` 截图）。改法：
 
 1. 在本地 `E:\Qdoer\落地页-样稿\build_page.py` 里改文案 / 链接 / 卡片顺序；
-2. 跑 `build_page.py` 生成新的 `index.html`；
-3. 把新的 `index.html` 覆盖到本仓库，`git commit && git push`；
+2. 跑 `python build_page.py`。它会：问徽章后端取这次的下载 / 浏览数（取不到用 `SNAPSHOT` 兜底）；
+   从 GitHub API 读每款最新 tag 与 exe 资产名，自动解析下载直链（见下一节）；
+   探 hiwiki 镜像是否真上线，只挂上线的；最后产出 `index.html` 与 1200x630 的 `og-cover.png`；
+3. 把 `index.html` 和 `og-cover.png` 一起覆盖到本仓库，`git commit && git push`；
 4. Actions 跑完，线上就变了（约 1 分钟）。
+
+`shots\` 里是四款真实界面截图：狐径 / 桌面壁纸 / 热点新闻从各自仓库 `docs/demo/*.mp4` 抽帧，
+LIVE直播源用仓库自带的 `docs/screenshot.png`。生成器把它们内联成 webp data URI，
+所以 `index.html` 仍是单文件；`og-cover.png` 是唯一额外上传的资产，由发布脚本自动带上。
+
+## 下载直链怎么来的
+
+主按钮不再指向发行版列表页，而是指到 exe 本身，省掉「选版本 → 点附件」两步。
+生成器优先拼 `gitcode.com/<owner>/<repo>/releases/download/<tag>/<资产名>`，
+探不通再回退 GitHub `releases/latest/download/<资产名>`（并在按钮下如实标注）。
+
+两个实测出来的坑（2026-11-10）：
+
+- GitCode `latest/download/...` 返回的是 HTML 不是文件，必须带 tag；
+- 探测只能用 `curl --range 0-0` 这种 1 字节 GET，成功码 `206` +
+  `application/octet-stream` 才算真附件。HEAD 会被 GitCode 回 401，
+  完整 GET 又会白下 8–15 MB。`--offline` 时不联网，用 `DL_STATIC` 里已实测的链接。
 
 ## 一个必须知道的坑
 
