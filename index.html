@@ -114,7 +114,7 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
     <span>免费无广告</span><span>单文件免安装</span><span>不要管理员权限</span>
     <span>不采集不上传数据</span><span>MIT 开源，源码可查</span><span>删除即卸载</span>
   </div>
-  <p class="social">四款合计 <b id="sum-downloads">5,883</b> 次下载 · <b id="sum-views">7,088</b> 次浏览 · <a href="#numbers">口径说明</a> · <span id="snap-note">快照 2026-11-10（实时取不到时显示这份数）</span></p>
+  <p class="social">四款合计 <b id="sum-downloads">5,887</b> 次下载 · <b id="sum-views">7,111</b> 次浏览 · <a href="#numbers">口径说明</a> · <span id="snap-note">快照 2026-11-10（实时取不到时显示这份数）</span></p>
 </header>
 
 <h2 class="sec" id="apps">选一个你正遇到的问题</h2>
@@ -133,8 +133,8 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
       <span class="badge">下载最多</span>
     </div>
     <div class="metrics">
-      <div class="m"><b id="d-FoxPath" data-base="3884">3,884</b><span>下载 · 发行版合计</span></div>
-      <div class="m"><b id="v-FoxPath" data-base="3851">3,851</b><span>浏览 · 各平台合计</span></div>
+      <div class="m"><b id="d-FoxPath" data-base="3886">3,886</b><span>下载 · 发行版合计</span></div>
+      <div class="m"><b id="v-FoxPath" data-base="3860">3,860</b><span>浏览 · 各平台合计</span></div>
     </div>
     <p class="fix">GitHub 又打不开了？双击它，等半分钟就能正常上。</p>
     <ul>
@@ -180,8 +180,8 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
       <span class="badge">刚更新</span>
     </div>
     <div class="metrics">
-      <div class="m"><b id="d-ms-wallpaper-assistant" data-base="1415">1,415</b><span>下载 · 发行版合计</span></div>
-      <div class="m"><b id="v-ms-wallpaper-assistant" data-base="1604">1,604</b><span>浏览 · 各平台合计</span></div>
+      <div class="m"><b id="d-ms-wallpaper-assistant" data-base="1416">1,416</b><span>下载 · 发行版合计</span></div>
+      <div class="m"><b id="v-ms-wallpaper-assistant" data-base="1610">1,610</b><span>浏览 · 各平台合计</span></div>
     </div>
     <p class="fix">想每天开机都换张好壁纸，又懒得自己找图？装完就不用管了。</p>
     <ul>
@@ -227,8 +227,8 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
       <span class="badge">仅 GitHub</span>
     </div>
     <div class="metrics">
-      <div class="m"><b id="d-LiveIPTV" data-base="337">337</b><span>下载 · 发行版合计</span></div>
-      <div class="m"><b id="v-LiveIPTV" data-base="754">754</b><span>浏览 · 各平台合计</span></div>
+      <div class="m"><b id="d-LiveIPTV" data-base="338">338</b><span>下载 · 发行版合计</span></div>
+      <div class="m"><b id="v-LiveIPTV" data-base="756">756</b><span>浏览 · 各平台合计</span></div>
     </div>
     <p class="fix">网上的直播源十条有九条放不出来？一键跑出一条自己真能播的 M3U。</p>
     <ul>
@@ -274,7 +274,7 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
     </div>
     <div class="metrics">
       <div class="m"><b id="d-hotnews" data-base="247">247</b><span>下载 · 发行版合计</span></div>
-      <div class="m"><b id="v-hotnews" data-base="879">879</b><span>浏览 · 各平台合计</span></div>
+      <div class="m"><b id="v-hotnews" data-base="885">885</b><span>浏览 · 各平台合计</span></div>
     </div>
     <p class="fix">不想被推荐算法喂？一个窗口看完当天各站热榜，只看标题和原文链接。</p>
     <ul>
@@ -334,8 +334,9 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
 
 </div>
 <script>
-/* 实时取数：只读 img.shields.io（它回 Access-Control-Allow-Origin: *，并带 5 分钟缓存）。
-   取到就把快照换成实时值；取不到就原样留着 html 里烧好的快照 —— 不做假数，也不做重试轰炸。 */
+/* 实时取数：只读 img.shields.io（它回 CORS 头，结果缓存 5 分钟）。
+   取到就覆盖 html 里烧好的快照。失败时换缓存键只重试一次（缓存里的错误响应
+   不会因此被重复取到），仍失败就留快照并保留日期标注 —— 不做假数，不轰炸接口。 */
 (function () {
   var APPS = [{"repo": "FoxPath", "key": "FoxPath"}, {"repo": "ms-wallpaper-assistant", "key": "ms-wallpaper-assistant"}, {"repo": "LiveIPTV", "key": "LiveIPTV"}, {"repo": "hotnews", "key": "hotnews"}];
   var WORKER = "https://kele551-badge.kele551.workers.dev/";
@@ -368,20 +369,28 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:v
 
   APPS.forEach(function (a) {
     ["downloads", "views"].forEach(function (kind) {
-      var url = WORKER + "?repo=" + encodeURIComponent(a.repo) + "&kind=" + kind;
-      fetch("https://img.shields.io/endpoint.json?url=" + encodeURIComponent(url))
-        .then(function (r) {
+      var target = WORKER + "?repo=" + encodeURIComponent(a.repo) + "&kind=" + kind;
+      function endpoint(bust) {
+        var u = bust ? target + "&_=" + Date.now() : target;
+        return "https://img.shields.io/endpoint.json?url=" + encodeURIComponent(u);
+      }
+      function read(url) {
+        return fetch(url).then(function (r) {
           return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status));
-        })
-        .then(function (j) {
+        }).then(function (j) {
           var n = parseInt(String(j.value || j.message || "").replace(/[^0-9]/g, ""), 10);
-          if (n > 0) {
-            (live[a.repo] = live[a.repo] || {})[kind] = n;
-            anyLive = true;
-            paint();
-          }
-        })
-        .catch(function () { /* 保留快照 */ });
+          if (!(n > 0)) throw new Error("不是数字");
+          return n;
+        });
+      }
+      function accept(n) {
+        (live[a.repo] = live[a.repo] || {})[kind] = n;
+        anyLive = true;
+        paint();
+      }
+      read(endpoint(false)).then(accept).catch(function () {
+        read(endpoint(true)).then(accept).catch(function () { /* 保留快照 */ });
+      });
     });
   });
 })();

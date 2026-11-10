@@ -24,7 +24,8 @@
 生成器不放进这个仓库（它要读本机各项目的图标路径和 `shots\` 截图）。改法：
 
 1. 在本地 `E:\Qdoer\落地页-样稿\build_page.py` 里改文案 / 链接 / 卡片顺序；
-2. 跑 `python build_page.py`。它会：问徽章后端取这次的下载 / 浏览数（取不到用 `SNAPSHOT` 兜底）；
+2. 跑 `python build_page.py`。它会：问徽章后端取这次的下载 / 浏览数（取不到时换 shields.io 缓存键再取一次，
+   仍失败用 `SNAPSHOT` 兜底）；
    从 GitHub API 读每款最新 tag 与 exe 资产名，自动解析下载直链（见下一节）；
    探 hiwiki 镜像是否真上线，只挂上线的；最后产出 `index.html` 与 1200x630 的 `og-cover.png`；
 3. 把 `index.html` 和 `og-cover.png` 一起覆盖到本仓库，`git commit && git push`；
