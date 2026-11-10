@@ -9,7 +9,6 @@ on:
     paths:
       - "index.html"
       - "og-cover.png"
-      - "og-cover.png"
       - "tools/deploy_pages.py"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:      # 也可以在 Actions 页面手动点一次

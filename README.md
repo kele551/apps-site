@@ -15,13 +15,16 @@
 - 工作流：`.github/workflows/deploy.yml`
 - 发布脚本：`tools/deploy_pages.py`（纯 REST，不需要 node / wrangler）
 - 密钥：仓库 Secret `CLOUDFLARE_API_TOKEN`（权限 Account → Cloudflare Pages → Edit）
-- 只有 `index.html` / `og-cover.png` / 脚本 / 工作流变动才触发；改 README 不触发。
+- 只有 `index.html` / `og-cover.png` / `tools/deploy_pages.py` / 工作流变动才触发；
+  改 README 或 `generator/` 里的源码不触发部署。
 - 发布末尾会**回读生产地址比对 sha256**，不一致就让这次 Actions 红掉（部署成功不等于能打开）。
 
 ## 页面怎么改
 
-页面本体由本地脚本生成（四款 app 的图标、界面截图、数字快照都内联进 `index.html`），
-生成器不放进这个仓库（它要读本机各项目的图标路径和 `shots\` 截图）。改法：
+页面本体由本地脚本生成（四款 app 的图标、界面截图、数字快照都内联进 `index.html`）。
+**生成器源码已随仓库备份在 [`generator/`](generator/)**（含 `shots\` 截图与 `icons\` 图标副本，
+路径可配置、能独立运行）；但**日常活版本仍是 `E:\Qdoer\落地页-样稿\build_page.py`**，
+只改 `generator/` 不会自动上线，两边要保持同步。改法：
 
 1. 在本地 `E:\Qdoer\落地页-样稿\build_page.py` 里改文案 / 链接 / 卡片顺序；
 2. 跑 `python build_page.py`。它会：问徽章后端取这次的下载 / 浏览数（取不到时换 shields.io 缓存键再取一次，
@@ -34,6 +37,9 @@
 `shots\` 里是四款真实界面截图：狐径 / 桌面壁纸 / 热点新闻从各自仓库 `docs/demo/*.mp4` 抽帧，
 LIVE直播源用仓库自带的 `docs/screenshot.png`。生成器把它们内联成 webp data URI，
 所以 `index.html` 仍是单文件；`og-cover.png` 是唯一额外上传的资产，由发布脚本自动带上。
+
+`generator/` 的代码产物默认写在它自己的目录，不会覆盖根目录发布文件；
+路径可用 `PAGE_OUT_DIR` / `PAGE_REPO_ROOT` 等环境变量覆盖，详见 `generator/README.md`。
 
 ## 下载直链怎么来的
 
