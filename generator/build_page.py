@@ -172,15 +172,19 @@ STATIC_RELEASE = {
 }
 
 # --offline 时用的下载链接。GitCode 直链必须带 tag，它不支持 latest/download（会返回 HTML）。
+# 第四元素是 gitcode_url，客户端 JS 会现场探测，通了就把主按钮切回国内直链。
 DL_STATIC = {
     "FoxPath": ("https://gitcode.com/kele551/FoxPath/releases/download/v1.2.4/FoxPath.exe",
-                "国内主源 · 点一下就开始下载", "实测 200"),
+                "国内直链 · 点一下就开始下载", "实测 200",
+                "https://gitcode.com/kele551/FoxPath/releases/download/v1.2.4/FoxPath.exe"),
     "ms-wallpaper-assistant": ("https://github.com/kele551/ms-wallpaper-assistant/releases/latest/download/MSWallpaperAssistant-v2.4.5.exe",
-                "国内镜像尚未同步 v2.4.5，打不开请点下方备用源", "GitHub 直链"),
+                "GitHub 直链 · 如打不开点下方备用源", "GitHub 直链",
+                "https://gitcode.com/kele551/ms-wallpaper-assistant/releases/download/v2.4.5/MSWallpaperAssistant-v2.4.5.exe"),
     "LiveIPTV": ("https://github.com/kele551/LiveIPTV/releases/latest/download/LiveIPTV.exe",
-                "GitHub 唯一来源 · 打不开请点下方发行页", "GitHub 直链"),
+                "GitHub 直链 · 打不开点下方发行页", "GitHub 直链", ""),
     "hotnews": ("https://gitcode.com/kele551/hotnews/releases/download/v1.5.9/hotnews-v1.5.9.exe",
-                "国内主源 · 点一下就开始下载", "实测 200"),
+                "国内直链 · 点一下就开始下载", "实测 200",
+                "https://gitcode.com/kele551/hotnews/releases/download/v1.5.9/hotnews-v1.5.9.exe"),
 }
 
 FAQ = [
@@ -380,16 +384,19 @@ def resolve_download(app, meta):
     ok, info = http_probe(gc)
     print("  %s %-24s %-14s %s" % ("OK" if ok else "--", repo, "GitCode 直链", info))
     if ok:
-        return gc, "国内主源 · 点一下就开始下载", "GitCode 直链"
+        # 即使生成时 GitCode 通，也把 gitcode_url 留给客户端 JS：用户当下网络如果通，
+        # 页面加载时再切一次，避免 8 天前的探测结果烧死在按钮上。
+        return gc, "国内直链 · 点一下就开始下载", "GitCode 直链", gc
 
     # GitHub 的 releases/latest/download/<资产名> 是官方稳定格式，资产名刚由 API 核实过。
-    # 本机 HEAD 常因境内网络返回 000，那是「我这连不上」，不是「链接无效」，
-    # 所以不因此退回列表页（退回列表页才是真的多两步），只在按钮下如实说明。
+    # 本机 HEAD 常因境内网络返回 000，那是「我这连不上」，不是「链接无效」。
+    # 按钮上不写「主源暂不可用」这种自我否定——只说这是哪条线，打不开点下方备用源就行。
     ok2, info2 = http_probe(gh)
     print("  %s %-24s %-14s %s" % ("OK" if ok2 else "--", repo, "GitHub 直链", info2))
-    note = "国内主源暂不可用，打不开请点下方备用源"
+    note = "GitHub 直链 · 如打不开点下方备用源"
     mark = "GitHub 直链" + ("" if ok2 else "（本机探测未通，链接格式已核实）")
-    return gh, note, mark
+    # 仍然把 gc 传出去：客户端 JS 探测到用户当下网络能通 GitCode，就自动切回国内直链。
+    return gh, note, mark, gc
 
 
 def make_og_cover(sum_d, sum_v):
@@ -477,7 +484,8 @@ border:1px solid var(--line);object-fit:contain}
 .dl{display:block;text-align:center;text-decoration:none;background:var(--accent);color:var(--accent-ink);
 border-radius:10px;padding:12px 16px;font-size:15px;font-weight:600}
 .dl small{display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px}
-.assure{text-align:center;font-size:12px;color:var(--muted);margin:8px 0 12px}
+.smartscreen{text-align:center;font-size:11.5px;color:var(--muted);margin:8px 0 0;opacity:.85}
+.assure{text-align:center;font-size:12px;color:var(--muted);margin:6px 0 12px}
 .links{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;font-size:12.5px;margin-top:auto}
 .links a{text-decoration:none}
 .legacy{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--muted);line-height:1.9}
@@ -626,6 +634,26 @@ TPL = """<!DOCTYPE html>
     });
   });
 })();
+
+/* 国内直链现场探测：生成时已经验证过文件在 GitCode 上，但那是几天前的事。
+   用户当下如果能连 GitCode（国内通常通，GitHub 通常不通），就把主按钮切回国内直链；
+   连不上就保持 GitHub 直链。no-cors HEAD 不下载 body，只判断网络通不通。 */
+(function () {
+  document.querySelectorAll('.dl[data-gc-url]').forEach(function (a) {
+    var gc = a.getAttribute('data-gc-url');
+    if (!gc || a.getAttribute('href') === gc) return;
+    var small = a.querySelector('small');
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 2500);
+    fetch(gc, { method: 'HEAD', mode: 'no-cors', cache: 'no-store', signal: ctrl.signal })
+      .then(function () {
+        clearTimeout(timer);
+        a.href = gc;
+        if (small) small.textContent = '国内直链 · 已自动测速切换';
+      })
+      .catch(function () { clearTimeout(timer); /* 保持 GitHub 直链 */ });
+  });
+})();
 </script>
 </body>
 </html>
@@ -651,7 +679,8 @@ CARD_TPL = """<article class="card" id="@@SLUG@@">
 @@BENEFITS@@
     </ul>
     <p class="meta">@@TAG@@ · @@MB@@ MB · @@DATE@@ 更新 · Windows 10/11</p>
-    <a class="dl" href="@@DL_URL@@">⬇ 直接下载 @@ASSET@@<small>@@DL_NOTE@@</small></a>
+    <a class="dl" href="@@DL_URL@@" data-gc-url="@@GC_URL@@">⬇ 直接下载 @@ASSET@@<small>@@DL_NOTE@@</small></a>
+    <p class="smartscreen">首次打开可能弹 SmartScreen → 点「更多信息」→「仍要运行」</p>
     <p class="assure">@@ASSURE@@</p>
     <div class="links">
 @@LINKS@@
@@ -700,7 +729,7 @@ def render_card(app, live, hiwiki, meta, dl):
         legacy_html = ('      <div class="legacy"><b>其他下载入口（旧链接照旧留着）</b><br>\n'
                        + " · ".join('<a href="%s" target="_blank" rel="noopener">%s</a>' % (u, l)
                                     for l, u in legacy) + '</div>')
-    url, dl_note, _mark = dl
+    url, dl_note, _mark, gc_url = dl
     return fill(CARD_TPL, {
         "SLUG": app["repo"].lower().replace("-", ""),
         "SHOT": shot_data_uri(app["shot"]), "SHOT_NOTE": app["shot_note"],
@@ -708,7 +737,7 @@ def render_card(app, live, hiwiki, meta, dl):
         "BADGE": app["badge"], "KEY": key, "D": d, "D_FMT": format(d, ","),
         "V": v, "V_FMT": format(v, ","), "FIX": app["fix"],
         "BENEFITS": benefits, "TAG": meta["tag"], "MB": meta["mb"], "DATE": meta["date"],
-        "DL_URL": url, "ASSET": meta["asset"], "DL_NOTE": dl_note,
+        "DL_URL": url, "ASSET": meta["asset"], "DL_NOTE": dl_note, "GC_URL": gc_url or "",
         "ASSURE": app["assure"], "LINKS": link_html, "TECH": tech,
         "GH": app["gh"], "NOTE": note, "LEGACY": legacy_html,
     })
